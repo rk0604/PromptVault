@@ -14,6 +14,7 @@ of the supported, importable API.
 """
 
 import json
+import sys
 import threading
 from datetime import datetime, timezone
 
@@ -22,6 +23,22 @@ from . import runner
 from . import evaluator
 
 __all__ = ["experiment", "run", "evaluate"]
+
+
+def _can_encode(text):
+    """Return True if the current stdout can encode ``text`` without error."""
+    enc = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        text.encode(enc)
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+# Status glyphs degrade to ASCII on consoles that can't encode them, e.g. the
+# default Windows console (cp1252), which would otherwise raise on '→'/'✓'.
+_ARROW = "→" if _can_encode("→") else "->"
+_CHECK = "✓" if _can_encode("✓") else "OK"
 
 # Thread-local storage for the currently active experiment context.
 _state = threading.local()
@@ -53,14 +70,14 @@ class experiment:
         _state.experiment_id = self.experiment_id
         _state.model = self.model
         _state.vars = self.vars
-        print(f"→ experiment '{self.name}' started ({self.experiment_id})")
+        print(f"{_ARROW} experiment '{self.name}' started ({self.experiment_id})")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _state.experiment_id = None
         _state.model = None
         _state.vars = None
-        print(f"✓ experiment '{self.name}' complete")
+        print(f"{_CHECK} experiment '{self.name}' complete")
         return False
 
 
