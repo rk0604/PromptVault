@@ -38,10 +38,10 @@ class experiment:
             evaluate(result, {"has_topic": lambda r: "cat" in r.lower()})
     """
 
-    def __init__(self, name, model, vars={}):
+    def __init__(self, name, model, vars=None):
         self.name = name
         self.model = model
-        self.vars = vars
+        self.vars = vars or {}
 
     def __enter__(self):
         self.experiment_id = db.generate_id()

@@ -7,11 +7,6 @@ stores each resulting score in SQLite via the ``db`` module.
 from . import db
 
 
-def evaluate(run, expectation=None, **kwargs):
-    """Score a recorded run against an expectation or metric and store it."""
-    raise NotImplementedError
-
-
 def infer_value_type(value):
     """Return ``(stringified_value, type_string)`` for a raw metric value.
 

@@ -186,13 +186,3 @@ def _compute_cost(model, input_tokens, output_tokens):
         )
         return 0.0
     return input_tokens * rates["input"] + output_tokens * rates["output"]
-
-
-def experiment(name, **config):
-    """Register a named experiment and return a handle for running prompts."""
-    raise NotImplementedError
-
-
-def run(prompt, model=None, **kwargs):
-    """Execute ``prompt`` against a model provider and record the response."""
-    raise NotImplementedError
