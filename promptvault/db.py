@@ -23,60 +23,69 @@ def get_connection():
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    _ensure_schema(conn)
     return conn
 
 
+def _ensure_schema(conn):
+    """Create the experiments, runs, and scores tables if they don't exist.
+
+    Run on every connection so the schema is guaranteed to exist in whatever
+    ``promptvault.db`` the current working directory resolves to. The
+    statements are idempotent, so repeated calls are cheap and harmless.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS experiments (
+            experiment_id   TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            model           TEXT NOT NULL,
+            vars_snapshot   TEXT NOT NULL,
+            vars_hash       TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id           TEXT PRIMARY KEY,
+            experiment_id    TEXT NOT NULL REFERENCES experiments(experiment_id),
+            prompt_name      TEXT NOT NULL,
+            prompt_hash      TEXT NOT NULL,
+            system_snapshot  TEXT,
+            user_snapshot    TEXT NOT NULL,
+            response         TEXT NOT NULL,
+            input_tokens     INTEGER NOT NULL,
+            output_tokens    INTEGER NOT NULL,
+            latency_ms       INTEGER NOT NULL,
+            cost_usd         REAL NOT NULL,
+            stop_reason      TEXT,
+            model            TEXT NOT NULL,
+            timestamp        TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scores (
+            score_id     TEXT PRIMARY KEY,
+            run_id       TEXT NOT NULL REFERENCES runs(run_id),
+            metric_name  TEXT NOT NULL,
+            value        TEXT NOT NULL,
+            value_type   TEXT NOT NULL,
+            created_at   TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
 def initialize():
-    """Create the experiments, runs, and scores tables if they don't exist."""
-    conn = get_connection()
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS experiments (
-                experiment_id   TEXT PRIMARY KEY,
-                name            TEXT NOT NULL,
-                model           TEXT NOT NULL,
-                vars_snapshot   TEXT NOT NULL,
-                vars_hash       TEXT NOT NULL,
-                created_at      TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS runs (
-                run_id           TEXT PRIMARY KEY,
-                experiment_id    TEXT NOT NULL REFERENCES experiments(experiment_id),
-                prompt_name      TEXT NOT NULL,
-                prompt_hash      TEXT NOT NULL,
-                system_snapshot  TEXT,
-                user_snapshot    TEXT NOT NULL,
-                response         TEXT NOT NULL,
-                input_tokens     INTEGER NOT NULL,
-                output_tokens    INTEGER NOT NULL,
-                latency_ms       INTEGER NOT NULL,
-                cost_usd         REAL NOT NULL,
-                stop_reason      TEXT,
-                model            TEXT NOT NULL,
-                timestamp        TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS scores (
-                score_id     TEXT PRIMARY KEY,
-                run_id       TEXT NOT NULL REFERENCES runs(run_id),
-                metric_name  TEXT NOT NULL,
-                value        TEXT NOT NULL,
-                value_type   TEXT NOT NULL,
-                created_at   TEXT NOT NULL
-            )
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    """Explicitly ensure the schema exists. Optional: ``get_connection`` already
+    ensures it on every connection. Kept for callers that want to create the
+    database up front."""
+    get_connection().close()
 
 
 def insert_experiment(experiment_id, name, model, vars_snapshot, vars_hash):
@@ -177,7 +186,3 @@ def generate_id():
 def _now_iso():
     """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
-
-
-# Ensure the schema exists as soon as the module is imported.
-initialize()

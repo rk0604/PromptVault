@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from promptvault import experiment, run, evaluate, db
+from promptvault import experiment, run, evaluate
 
 
 def make_anthropic_response(text, input_tokens=50, output_tokens=10,
@@ -43,9 +43,9 @@ class MockFlowTest(unittest.TestCase):
         self._origin = os.getcwd()
         self._tmp = tempfile.mkdtemp()
         os.chdir(self._tmp)
-        # initialize() runs at import time against the import-time cwd, so the
-        # fresh promptvault.db in this temp workspace needs its schema created.
-        db.initialize()
+        # No explicit initialize() needed: get_connection() ensures the schema
+        # in whatever promptvault.db the current directory resolves to, so this
+        # fresh temp workspace gets its tables created on first use.
         os.makedirs("prompts")
         with open("prompts/summarize.txt", "w", encoding="utf-8") as f:
             f.write("Summarize the following text: {{text}}")
@@ -124,6 +124,29 @@ class MockFlowTest(unittest.TestCase):
         response = conn.execute("SELECT response FROM runs").fetchone()[0]
         self.assertEqual(response, "Persisted summary.")
         conn.close()
+
+    def test_schema_created_after_chdir(self):
+        """Regression: the schema must exist even when cwd changes after import.
+
+        This is the scenario that originally raised 'no such table: experiments'
+        because initialize() ran only once at import-time cwd.
+        """
+        mock_response = make_anthropic_response("Fresh dir summary.")
+        deeper = os.path.join(self._tmp, "nested", "workdir")
+        os.makedirs(os.path.join(deeper, "prompts"))
+        with open(os.path.join(deeper, "prompts", "summarize.txt"),
+                  "w", encoding="utf-8") as f:
+            f.write("Summarize: {{text}}")
+        os.chdir(deeper)  # change cwd well after promptvault was imported
+
+        with patch("anthropic.Anthropic") as mock_client:
+            mock_client.return_value.messages.create.return_value = mock_response
+            with experiment("after-chdir", model="claude-sonnet-4-6",
+                            vars={"text": "hi"}):
+                result = run("summarize")
+
+        self.assertEqual(result["response"], "Fresh dir summary.")
+        self.assertTrue(os.path.exists("promptvault.db"))
 
 
 if __name__ == "__main__":
