@@ -1,44 +1,69 @@
-# PromptVault — Agent Guide (root)
+# PromptVault — Agent Guide (src)
 
-PromptVault is a minimal local SDK for running LLM prompts and storing their results, metrics, and scores in SQLite.
+## Files
 
-## Public API
+- `__init__.py` — defines the public API and holds thread-local experiment state.
+- `runner.py` — loads prompt files, resolves `{{var}}` placeholders, calls the LLM, computes hashes and cost.
+- `evaluator.py` — executes metric callables and infers each score's value type.
+- `db.py` — owns every SQLite operation: connection, schema, inserts, id generation.
 
-Three functions. Nothing else is public.
+## Public API surface
 
-- `experiment(name, model, vars)` — context manager that registers and scopes an experiment.
-- `run(prompt_name)` — loads a prompt, calls the model, records the run. Returns a result dict.
-- `evaluate(result, metrics)` — scores a run with developer-defined metric callables.
+Exactly three names are exported from `__init__.py`: `experiment`, `run`, `evaluate`. Nothing else.
 
-## Data model
+## SQLite schema
 
-Two-tier hierarchy, parent to child:
+Database file: `promptvault.db` in the current working directory. WAL mode enabled.
 
-```
-experiment ──< run ──< score
-```
+**experiments**
+- `experiment_id` TEXT PRIMARY KEY
+- `name` TEXT NOT NULL
+- `model` TEXT NOT NULL
+- `vars_snapshot` TEXT NOT NULL — JSON string of vars
+- `vars_hash` TEXT NOT NULL — sha256 of vars_snapshot
+- `created_at` TEXT NOT NULL — ISO 8601
 
-- One experiment contains many runs.
-- One run contains many scores.
-- A run cannot exist without an experiment. A score cannot exist without a run.
+**runs**
+- `run_id` TEXT PRIMARY KEY
+- `experiment_id` TEXT NOT NULL REFERENCES experiments(experiment_id)
+- `prompt_name` TEXT NOT NULL
+- `prompt_hash` TEXT NOT NULL
+- `system_snapshot` TEXT — resolved system prompt sent to API (nullable)
+- `user_snapshot` TEXT NOT NULL — resolved user prompt sent to API
+- `response` TEXT NOT NULL
+- `input_tokens` INTEGER NOT NULL
+- `output_tokens` INTEGER NOT NULL
+- `latency_ms` INTEGER NOT NULL
+- `cost_usd` REAL NOT NULL
+- `stop_reason` TEXT
+- `model` TEXT NOT NULL
+- `timestamp` TEXT NOT NULL — ISO 8601
 
-## Auto-captured vs developer-defined
+**scores**
+- `score_id` TEXT PRIMARY KEY
+- `run_id` TEXT NOT NULL REFERENCES runs(run_id)
+- `metric_name` TEXT NOT NULL
+- `value` TEXT NOT NULL — always stored as string
+- `value_type` TEXT NOT NULL — one of: bool, int, float, str
+- `created_at` TEXT NOT NULL — ISO 8601
 
-Auto-captured per run: `response`, `input_tokens`, `output_tokens`, `latency_ms`, `cost_usd`, `stop_reason`, `model`, `prompt_hash`, `vars_hash`, timestamps.
+## State flow through a run
 
-Developer-defined: the prompt templates, the `vars` dict, the model string, and the metric lambdas passed to `evaluate`.
+1. `experiment.__enter__` writes `experiment_id`, `model`, `vars` to `_state` (a `threading.local`).
+2. `run` reads `_state`; raises `RuntimeError` if no active experiment. It returns a result dict containing `run_id` plus all captured fields.
+3. `evaluate` reads that result dict (uses `result["response"]` and `result["run_id"]`); raises `RuntimeError` if no active experiment.
+4. `experiment.__exit__` clears `_state`.
 
-## Internal modules
+## Hashing
 
-- `promptvault/__init__.py` — the public API (`experiment`, `run`, `evaluate`) and thread-local state.
-- `promptvault/runner.py` — loads prompts, resolves templates, calls the LLM, captures metrics, computes hashes.
-- `promptvault/evaluator.py` — runs metric callables and infers score value types.
-- `promptvault/db.py` — all SQLite access: connection, schema, inserts, id generation.
+- `prompt_hash` = first 8 chars of `sha256( (system or "") + "\n" + user )`, on RAW templates BEFORE vars are filled in.
+- `vars_hash` = first 8 chars of `sha256( json.dumps(vars, sort_keys=True) )`. Sorted keys make it deterministic.
 
-## Never do this
+## Score value type inference
 
-- Never add built-in metrics or opinions about response quality.
-- Never add cloud sync, auth, or team features.
-- Never let runs exist outside an experiment context.
-- Never add external dependencies beyond `anthropic` and `openai`.
-- Never expose internal functions in `__init__.py`.
+`infer_value_type(value)` returns `(stringified, type)`. Check order matters:
+`None` → `("none","str")`; `bool` (before int) → lowercased; `int`; `float`; `str`; anything else → `str(value)` with type `str`.
+
+## API keys
+
+Read from environment by each SDK: `anthropic.Anthropic()` uses `ANTHROPIC_API_KEY`, `openai.OpenAI()` uses `OPENAI_API_KEY`. Never hardcode keys.
