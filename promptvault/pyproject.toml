@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "promptvault"
+version = "0.1.0"
+description = "A lightweight toolkit for storing, running, and evaluating LLM prompts."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = [
+    "anthropic",
+    "openai",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["promptvault*"]
